@@ -11,6 +11,13 @@
     },
     "momentsanserve": {
       "live": false
+    },
+    "daencutegirl": {
+      "live": true,
+      "start_time": 1785769808.3209772,
+      "acknowledged": false,
+      "last_reminder": 1785769808.3209772,
+      "message_id": 46
     }
   },
   "telegram_offset": 802096989,
