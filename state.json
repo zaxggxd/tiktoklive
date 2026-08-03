@@ -1,0 +1,22 @@
+{
+  "users": {
+    "lukchup001": {
+      "live": false
+    },
+    "bunny_vt3010": {
+      "live": false
+    },
+    "iicegb519": {
+      "live": false
+    },
+    "momentsanserve": {
+      "live": true,
+      "start_time": 1785750519.8995633,
+      "acknowledged": false,
+      "last_reminder": 1785750519.8995633,
+      "message_id": 35
+    }
+  },
+  "telegram_offset": 0,
+  "last_daily_ping_date": "2026-08-03"
+}
