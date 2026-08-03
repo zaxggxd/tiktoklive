@@ -4,7 +4,11 @@
       "live": false
     },
     "bunny_vt3010": {
-      "live": false
+      "live": true,
+      "start_time": 1785756919.7752078,
+      "acknowledged": false,
+      "last_reminder": 1785756919.7752078,
+      "message_id": 39
     },
     "iicegb519": {
       "live": false
