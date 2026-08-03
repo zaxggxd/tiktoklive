@@ -1,4 +1,3 @@
-# ใส่ username TikTok ที่ต้องการติดตาม บรรทัดละ 1 ชื่อ (ไม่ต้องมี @)
-# ตัวอย่าง:
-# tiktok
-# example_user
+lukchup001
+bunny_vt3010
+iicegb519
