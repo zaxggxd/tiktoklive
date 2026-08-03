@@ -10,11 +10,7 @@
       "live": false
     },
     "momentsanserve": {
-      "live": true,
-      "start_time": 1785750519.8995633,
-      "acknowledged": true,
-      "last_reminder": 1785756024.989942,
-      "message_id": 38
+      "live": false
     }
   },
   "telegram_offset": 802096989,
