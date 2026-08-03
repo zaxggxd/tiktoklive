@@ -6,7 +6,7 @@
     "bunny_vt3010": {
       "live": true,
       "start_time": 1785756919.7752078,
-      "acknowledged": false,
+      "acknowledged": true,
       "last_reminder": 1785758436.8956017,
       "message_id": 44
     },
@@ -21,6 +21,6 @@
       "message_id": 38
     }
   },
-  "telegram_offset": 802096980,
+  "telegram_offset": 802096989,
   "last_daily_ping_date": "2026-08-03"
 }
