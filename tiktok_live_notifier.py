@@ -1,26 +1,31 @@
 """
-TikTok Live Notifier
----------------------
-เช็คว่ารายชื่อ TikTok user ใน usernames.txt กำลังไลฟ์อยู่หรือไม่
-ถ้าเจอว่า "เพิ่งเริ่มไลฟ์" (จากไม่ไลฟ์ -> ไลฟ์) จะส่ง Telegram แจ้งเตือน
-เก็บสถานะล่าสุดไว้ใน state.json เพื่อไม่ให้แจ้งซ้ำ
+TikTok Live Notifier (v2)
+--------------------------
+ฟีเจอร์:
+  - แจ้งเตือนตอนเริ่มไลฟ์ พร้อมระยะเวลาที่ไลฟ์มาแล้ว และจำนวนผู้ชม (ถ้าดึงได้)
+  - มีปุ่ม "รับทราบแล้ว" ใต้ข้อความแจ้งเตือน
+  - ถ้ายังไม่กดรับทราบ และยังไลฟ์อยู่ -> แจ้งเตือนซ้ำทุก ~5 นาที
+  - พอกดรับทราบแล้ว จะหยุดแจ้งเตือนซ้ำ (จนกว่าจะไลฟ์รอบใหม่)
+  - ส่งข้อความสถานะระบบวันละ 1 ครั้ง (heartbeat)
 
 ต้องตั้ง environment variables:
   TELEGRAM_TOKEN   = token ของบอท
   TELEGRAM_CHAT_ID = chat id ที่จะส่งข้อความไปให้
-
-รันแบบ debug (ดู JSON ที่ดึงมาได้ เผื่อ TikTok เปลี่ยนโครงสร้างหน้า):
-  python tiktok_live_notifier.py --debug username
 """
 
 import os
 import re
 import sys
 import json
+import time
 import requests
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 STATE_FILE = "state.json"
 USERNAMES_FILE = "usernames.txt"
+TZ = ZoneInfo("Asia/Bangkok")
+REMINDER_INTERVAL_SEC = 4.5 * 60  # กันเหนียวกรณี GitHub schedule คลาดเคลื่อน
 
 HEADERS = {
     "User-Agent": (
@@ -30,6 +35,13 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+VIEWER_COUNT_KEYS = [
+    "user_count", "userCount", "viewerCount", "viewer_count",
+    "audienceCount", "audience_count", "total_user",
+]
+
+
+# ---------- ไฟล์ / state ----------
 
 def load_usernames():
     if not os.path.exists(USERNAMES_FILE):
@@ -43,7 +55,7 @@ def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {}
+    return {"users": {}, "telegram_offset": 0, "last_daily_ping_date": ""}
 
 
 def save_state(state):
@@ -51,12 +63,12 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
+# ---------- ดึงข้อมูลจาก TikTok ----------
+
 def extract_json_blob(html):
-    """ดึง JSON ที่ TikTok ฝังไว้ในหน้าเว็บ (โครงสร้างนี้อาจเปลี่ยนได้ในอนาคต)"""
     match = re.search(
         r'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>',
-        html,
-        re.S,
+        html, re.S,
     )
     if not match:
         return None
@@ -66,27 +78,49 @@ def extract_json_blob(html):
         return None
 
 
-def is_user_live(username, debug=False):
+def find_first_key(obj, keys, _depth=0):
+    """ค้นหาแบบ recursive หา key ที่ตรงกับใน keys ทั้ง dict/list ซ้อนกัน"""
+    if _depth > 12:
+        return None
+    if isinstance(obj, dict):
+        for k in keys:
+            if k in obj and isinstance(obj[k], (int, str)):
+                try:
+                    return int(obj[k])
+                except (ValueError, TypeError):
+                    pass
+        for v in obj.values():
+            found = find_first_key(v, keys, _depth + 1)
+            if found is not None:
+                return found
+    elif isinstance(obj, list):
+        for item in obj:
+            found = find_first_key(item, keys, _depth + 1)
+            if found is not None:
+                return found
+    return None
+
+
+def check_user(username, debug=False):
     """
-    True  = กำลังไลฟ์
-    False = ไม่ได้ไลฟ์
-    None  = เช็คไม่ได้ (โครงสร้างหน้าเปลี่ยน / โดนบล็อก ฯลฯ)
+    คืนค่า dict: {"live": bool/None, "viewer_count": int/None}
+    live=None หมายถึงเช็คไม่ได้รอบนี้ (ไม่ควรเปลี่ยน state)
     """
     url = f"https://www.tiktok.com/@{username}"
     try:
         resp = requests.get(url, headers=HEADERS, timeout=15)
     except requests.RequestException as e:
         print(f"[{username}] เชื่อมต่อไม่ได้: {e}")
-        return None
+        return {"live": None, "viewer_count": None}
 
     if resp.status_code != 200:
         print(f"[{username}] status code {resp.status_code}")
-        return None
+        return {"live": None, "viewer_count": None}
 
     data = extract_json_blob(resp.text)
     if data is None:
         print(f"[{username}] หา JSON ในหน้าเว็บไม่เจอ (โครงสร้างอาจเปลี่ยน)")
-        return None
+        return {"live": None, "viewer_count": None}
 
     if debug:
         print(json.dumps(data, ensure_ascii=False, indent=2)[:5000])
@@ -94,30 +128,191 @@ def is_user_live(username, debug=False):
     try:
         user_detail = data["__DEFAULT_SCOPE__"]["webapp.user-detail"]
     except (KeyError, TypeError):
-        print(f"[{username}] ไม่พบข้อมูล user-detail ในหน้านี้ (อาจไม่มี user นี้จริง)")
-        return None
+        print(f"[{username}] ไม่พบข้อมูล user-detail ในหน้านี้ (username อาจไม่ถูกต้อง)")
+        return {"live": None, "viewer_count": None}
 
-    # roomId ที่ไม่ใช่ "0"/ไม่มีค่า มักหมายถึงกำลังไลฟ์อยู่
-    room_id = None
     user_info = user_detail.get("userInfo", {})
     room_id = user_info.get("user", {}).get("roomId") or user_detail.get("roomId")
+    is_live = bool(room_id and str(room_id) != "0")
 
-    return bool(room_id and str(room_id) != "0")
+    viewer_count = None
+    if is_live:
+        viewer_count = find_first_key(user_detail, VIEWER_COUNT_KEYS)
+
+    return {"live": is_live, "viewer_count": viewer_count}
 
 
-def send_telegram(message):
+# ---------- Telegram ----------
+
+def tg_api(method, payload):
     token = os.environ.get("TELEGRAM_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if not token or not chat_id:
-        print("ไม่ได้ตั้งค่า TELEGRAM_TOKEN / TELEGRAM_CHAT_ID")
-        return
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    if not token:
+        print("ไม่ได้ตั้งค่า TELEGRAM_TOKEN")
+        return None
+    url = f"https://api.telegram.org/bot{token}/{method}"
     try:
-        r = requests.post(url, data={"chat_id": chat_id, "text": message}, timeout=15)
-        if r.status_code != 200:
-            print(f"ส่ง Telegram ไม่สำเร็จ: {r.text}")
+        r = requests.post(url, json=payload, timeout=15)
+        data = r.json()
+        if not data.get("ok"):
+            print(f"Telegram API error ({method}): {data}")
+        return data
     except requests.RequestException as e:
-        print(f"ส่ง Telegram ผิดพลาด: {e}")
+        print(f"Telegram API ผิดพลาด ({method}): {e}")
+        return None
+
+
+def send_telegram(text, with_ack_button=False, username=None):
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not chat_id:
+        print("ไม่ได้ตั้งค่า TELEGRAM_CHAT_ID")
+        return None
+    payload = {"chat_id": chat_id, "text": text}
+    if with_ack_button and username:
+        payload["reply_markup"] = {
+            "inline_keyboard": [[
+                {"text": "✅ รับทราบแล้ว", "callback_data": f"ack:{username}"}
+            ]]
+        }
+    result = tg_api("sendMessage", payload)
+    if result and result.get("ok"):
+        return result["result"]["message_id"]
+    return None
+
+
+def remove_ack_button(message_id, text):
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not chat_id or not message_id:
+        return
+    tg_api("editMessageText", {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": text,
+    })
+
+
+def process_incoming_updates(state):
+    """เช็คว่ามีคนกดปุ่ม 'รับทราบแล้ว' บ้างไหม แล้วอัปเดต state"""
+    result = tg_api("getUpdates", {
+        "offset": state.get("telegram_offset", 0),
+        "timeout": 0,
+        "allowed_updates": ["callback_query"],
+    })
+    if not result or not result.get("ok"):
+        return
+
+    for update in result.get("result", []):
+        state["telegram_offset"] = update["update_id"] + 1
+        cq = update.get("callback_query")
+        if not cq:
+            continue
+        data = cq.get("data", "")
+        if not data.startswith("ack:"):
+            continue
+        username = data.split(":", 1)[1]
+
+        tg_api("answerCallbackQuery", {
+            "callback_query_id": cq["id"],
+            "text": "รับทราบแล้ว ขอบคุณครับ",
+        })
+
+        user_state = state["users"].get(username)
+        if user_state and user_state.get("live"):
+            user_state["acknowledged"] = True
+            msg_id = user_state.get("message_id")
+            if msg_id:
+                remove_ack_button(
+                    msg_id,
+                    f"🔴 @{username} กำลังไลฟ์อยู่\n✅ รับทราบแล้ว"
+                )
+
+
+# ---------- Logic หลัก ----------
+
+def format_duration(seconds):
+    minutes = int(seconds // 60)
+    if minutes < 1:
+        return "เพิ่งเริ่ม"
+    if minutes < 60:
+        return f"{minutes} นาที"
+    hours = minutes // 60
+    rem = minutes % 60
+    return f"{hours} ชม. {rem} นาที"
+
+
+def build_live_message(username, duration_text, viewer_count):
+    viewer_text = f"{viewer_count} คน" if viewer_count is not None else "ไม่ทราบจำนวน"
+    return (
+        f"🔴 @{username} กำลังไลฟ์อยู่\n"
+        f"⏱ ไลฟ์มาแล้ว: {duration_text}\n"
+        f"👀 ผู้ชมตอนนี้: {viewer_text}\n"
+        f"🔗 https://www.tiktok.com/@{username}/live\n\n"
+        f"กดปุ่มด้านล่างถ้ารับทราบแล้ว ไม่งั้นจะแจ้งเตือนซ้ำทุก ~5 นาที"
+    )
+
+
+def handle_user(username, state, now_ts):
+    check = check_user(username)
+    if check["live"] is None:
+        return  # เช็คไม่ได้รอบนี้ ข้าม ไม่แตะ state
+
+    users = state["users"]
+    prev = users.get(username, {})
+    was_live = prev.get("live", False)
+
+    if check["live"] and not was_live:
+        # เพิ่งเริ่มไลฟ์
+        start_time = now_ts
+        duration_text = format_duration(0)
+        text = build_live_message(username, duration_text, check["viewer_count"])
+        msg_id = send_telegram(text, with_ack_button=True, username=username)
+        users[username] = {
+            "live": True,
+            "start_time": start_time,
+            "acknowledged": False,
+            "last_reminder": now_ts,
+            "message_id": msg_id,
+        }
+        print(f"[{username}] แจ้งเตือน: เริ่มไลฟ์")
+
+    elif check["live"] and was_live:
+        # ยังไลฟ์อยู่ต่อเนื่อง
+        start_time = prev.get("start_time", now_ts)
+        acknowledged = prev.get("acknowledged", False)
+        last_reminder = prev.get("last_reminder", start_time)
+
+        if not acknowledged and (now_ts - last_reminder) >= REMINDER_INTERVAL_SEC:
+            duration_text = format_duration(now_ts - start_time)
+            text = build_live_message(username, duration_text, check["viewer_count"])
+            msg_id = send_telegram(text, with_ack_button=True, username=username)
+            prev["last_reminder"] = now_ts
+            prev["message_id"] = msg_id
+            print(f"[{username}] แจ้งเตือนซ้ำ (ยังไม่ได้รับทราบ)")
+        users[username] = prev
+
+    elif not check["live"] and was_live:
+        # ไลฟ์จบแล้ว
+        print(f"[{username}] ไลฟ์จบแล้ว")
+        users[username] = {"live": False}
+
+    else:
+        # ไม่ไลฟ์ทั้งก่อนหน้าและตอนนี้ ไม่ต้องทำอะไร
+        users.setdefault(username, {"live": False})
+
+
+def send_daily_ping(state, usernames, now_dt):
+    today_str = now_dt.strftime("%Y-%m-%d")
+    if state.get("last_daily_ping_date") == today_str:
+        return
+    time_str = now_dt.strftime("%H:%M")
+    text = (
+        f"✅ ระบบแจ้งเตือน TikTok Live ทำงานปกติ\n"
+        f"📅 {today_str} เวลา {time_str} น.\n"
+        f"👁 กำลังติดตาม {len(usernames)} ช่อง: "
+        + ", ".join(f"@{u}" for u in usernames)
+    )
+    send_telegram(text)
+    state["last_daily_ping_date"] = today_str
+    print("ส่งข้อความสถานะระบบประจำวันแล้ว")
 
 
 def main():
@@ -128,7 +323,7 @@ def main():
             debug_user = sys.argv[idx + 1]
 
     if debug_user:
-        is_user_live(debug_user, debug=True)
+        check_user(debug_user, debug=True)
         return
 
     usernames = load_usernames()
@@ -137,27 +332,17 @@ def main():
         return
 
     state = load_state()
-    changed = False
+    now_dt = datetime.now(TZ)
+    now_ts = time.time()
+
+    process_incoming_updates(state)
 
     for username in usernames:
-        live_now = is_user_live(username)
-        if live_now is None:
-            continue  # เช็คไม่ได้รอบนี้ ข้ามไปก่อน ไม่แก้ state
+        handle_user(username, state, now_ts)
 
-        was_live = state.get(username, False)
+    send_daily_ping(state, usernames, now_dt)
 
-        if live_now and not was_live:
-            send_telegram(f"🔴 @{username} เริ่มไลฟ์แล้ว!\nhttps://www.tiktok.com/@{username}/live")
-            print(f"[{username}] แจ้งเตือน: เริ่มไลฟ์")
-        elif not live_now and was_live:
-            print(f"[{username}] ไลฟ์จบแล้ว")
-
-        if live_now != was_live:
-            state[username] = live_now
-            changed = True
-
-    if changed:
-        save_state(state)
+    save_state(state)
 
 
 if __name__ == "__main__":
