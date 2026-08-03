@@ -12,11 +12,11 @@
     "momentsanserve": {
       "live": true,
       "start_time": 1785750519.8995633,
-      "acknowledged": false,
+      "acknowledged": true,
       "last_reminder": 1785756024.989942,
       "message_id": 38
     }
   },
-  "telegram_offset": 0,
+  "telegram_offset": 802096980,
   "last_daily_ping_date": "2026-08-03"
 }
