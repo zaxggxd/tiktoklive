@@ -34,10 +34,26 @@ jobs:
         run: |
           git config user.name "tiktok-live-bot"
           git config user.email "actions@users.noreply.github.com"
-          git fetch origin main
-          git rebase origin/main || git rebase --abort
-          if [ -n "$(git status --porcelain state.json)" ]; then
-            git add state.json
-            git commit -m "update live state"
-            git push
+
+          if [ -z "$(git status --porcelain state.json)" ]; then
+            echo "state.json ไม่มีการเปลี่ยนแปลง"
+            exit 0
           fi
+
+          git add state.json
+          git commit -m "update live state"
+
+          attempt=1
+          while [ $attempt -le 5 ]; do
+            if git push; then
+              echo "push สำเร็จ"
+              exit 0
+            fi
+            echo "push ไม่สำเร็จ ลอง rebase แล้วลองใหม่ (ครั้งที่ $attempt)"
+            git fetch origin main
+            git rebase origin/main
+            attempt=$((attempt+1))
+            sleep $((RANDOM % 5 + 1))
+          done
+          echo "push ไม่สำเร็จหลังลองหลายครั้ง"
+          exit 1
