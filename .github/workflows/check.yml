@@ -1,7 +1,12 @@
 name: Check TikTok Live
 
 on:
-  workflow_dispatch: {}   # ให้ cron-job.org (หรือกดมือ) เป็นตัวสั่งรันเท่านั้น
+  workflow_dispatch:
+    inputs:
+      debug_user:
+        description: "username ที่จะ debug (เว้นว่างถ้าไม่ต้องการ debug)"
+        required: false
+        default: ""
 
 concurrency:
   group: tiktok-live-check
@@ -28,7 +33,12 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python tiktok_live_notifier.py
+        run: |
+          if [ -n "${{ github.event.inputs.debug_user }}" ]; then
+            python tiktok_live_notifier.py --debug "${{ github.event.inputs.debug_user }}"
+          else
+            python tiktok_live_notifier.py
+          fi
 
       - name: Commit state if changed
         run: |
