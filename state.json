@@ -17,11 +17,11 @@
       "message_id": 59
     },
     "daencutegirl": {
-      "live": false
+      "live": true,
+      "start_time": 1785850529.5636408
     },
     "kdusixgb": {
-      "live": true,
-      "start_time": 1785850242.020042
+      "live": false
     },
     "macha_7776": {
       "live": false
