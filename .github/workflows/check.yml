@@ -1,9 +1,11 @@
 name: Check TikTok Live
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"
-  workflow_dispatch: {}
+  workflow_dispatch: {}   # ให้ cron-job.org (หรือกดมือ) เป็นตัวสั่งรันเท่านั้น
+
+concurrency:
+  group: tiktok-live-check
+  cancel-in-progress: false   # ถ้ามีรอบใหม่เข้ามาตอนรอบเก่ายังไม่จบ ให้รอคิวแทนรันซ้อน
 
 permissions:
   contents: write
@@ -30,6 +32,7 @@ jobs:
         run: |
           git config user.name "tiktok-live-bot"
           git config user.email "actions@users.noreply.github.com"
+          git pull --rebase
           if [ -n "$(git status --porcelain state.json)" ]; then
             git add state.json
             git commit -m "update live state"
