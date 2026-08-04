@@ -10,11 +10,7 @@
       "live": false
     },
     "momentsanserve": {
-      "live": true,
-      "start_time": 1785834552.764058,
-      "acknowledged": false,
-      "last_reminder": 1785836128.7163565,
-      "message_id": 59
+      "live": false
     },
     "daencutegirl": {
       "live": true,
