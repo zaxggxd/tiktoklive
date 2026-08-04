@@ -367,7 +367,10 @@ def main():
     process_incoming_updates(state)
 
     for i, username in enumerate(usernames):
-        handle_user(username, state, now_ts)
+        try:
+            handle_user(username, state, now_ts)
+        except Exception as e:
+            print(f"[{username}] เกิดข้อผิดพลาดไม่คาดคิด: {type(e).__name__}: {e}")
         if i < len(usernames) - 1:
             time.sleep(random.uniform(*DELAY_BETWEEN_CHECKS_SEC))
 
