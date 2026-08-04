@@ -1,12 +1,14 @@
 """
-TikTok Live Notifier (v2)
+TikTok Live Notifier (v3)
 --------------------------
 ฟีเจอร์:
+  - เช็คเฉพาะช่วงเวลา 08:00 - 01:00 (เวลาไทย) เท่านั้น
   - แจ้งเตือนตอนเริ่มไลฟ์ พร้อมระยะเวลาที่ไลฟ์มาแล้ว และจำนวนผู้ชม (ถ้าดึงได้)
   - มีปุ่ม "รับทราบแล้ว" ใต้ข้อความแจ้งเตือน
   - ถ้ายังไม่กดรับทราบ และยังไลฟ์อยู่ -> แจ้งเตือนซ้ำทุก ~5 นาที
-  - พอกดรับทราบแล้ว จะหยุดแจ้งเตือนซ้ำ (จนกว่าจะไลฟ์รอบใหม่)
+  - พอกดรับทราบแล้ว จะหยุดแจ้งเตือนซ้ำ จนกว่าจะไลฟ์รอบใหม่ (ไลฟ์จบ -> เริ่มใหม่)
   - ส่งข้อความสถานะระบบวันละ 1 ครั้ง (heartbeat)
+  - หน่วงเวลาสั้นๆ ระหว่างเช็คแต่ละช่อง กันโดน TikTok บล็อกจากการยิงถี่เกินไป
 
 ต้องตั้ง environment variables:
   TELEGRAM_TOKEN   = token ของบอท
@@ -18,6 +20,7 @@ import re
 import sys
 import json
 import time
+import random
 import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -25,7 +28,13 @@ from zoneinfo import ZoneInfo
 STATE_FILE = "state.json"
 USERNAMES_FILE = "usernames.txt"
 TZ = ZoneInfo("Asia/Bangkok")
-REMINDER_INTERVAL_SEC = 4.5 * 60  # กันเหนียวกรณี GitHub schedule คลาดเคลื่อน
+REMINDER_INTERVAL_SEC = 4.5 * 60  # กันเหนียวกรณี schedule คลาดเคลื่อน
+DELAY_BETWEEN_CHECKS_SEC = (3, 6)  # หน่วงเวลาแบบสุ่มระหว่างเช็คแต่ละช่อง (วินาที)
+MAX_RETRIES = 2
+
+# ช่วงเวลาที่อนุญาตให้เช็ค: 08:00 ถึง 00:59 (เที่ยงคืนครึ่งหลัง จนถึงก่อนตี 1)
+ACTIVE_HOUR_START = 8   # เริ่มเช็คตั้งแต่ชั่วโมงนี้
+ACTIVE_HOUR_END_EXCLUSIVE = 1  # หยุดเช็คตอนถึงชั่วโมงนี้ (ตี 1)
 
 HEADERS = {
     "User-Agent": (
@@ -39,6 +48,14 @@ VIEWER_COUNT_KEYS = [
     "user_count", "userCount", "viewerCount", "viewer_count",
     "audienceCount", "audience_count", "total_user",
 ]
+
+
+# ---------- เวลาทำงาน ----------
+
+def is_within_active_hours(now_dt):
+    hour = now_dt.hour
+    # อนุญาต: 08:00-23:59 หรือ 00:00-00:59
+    return hour >= ACTIVE_HOUR_START or hour < ACTIVE_HOUR_END_EXCLUSIVE
 
 
 # ---------- ไฟล์ / state ----------
@@ -79,7 +96,6 @@ def extract_json_blob(html):
 
 
 def find_first_key(obj, keys, _depth=0):
-    """ค้นหาแบบ recursive หา key ที่ตรงกับใน keys ทั้ง dict/list ซ้อนกัน"""
     if _depth > 12:
         return None
     if isinstance(obj, dict):
@@ -104,42 +120,51 @@ def find_first_key(obj, keys, _depth=0):
 def check_user(username, debug=False):
     """
     คืนค่า dict: {"live": bool/None, "viewer_count": int/None}
-    live=None หมายถึงเช็คไม่ได้รอบนี้ (ไม่ควรเปลี่ยน state)
+    live=None หมายถึงเช็คไม่ได้รอบนี้ (ไม่ควรเปลี่ยน state) - จะลองใหม่ MAX_RETRIES ครั้งก่อนยอมแพ้
     """
     url = f"https://www.tiktok.com/@{username}"
-    try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-    except requests.RequestException as e:
-        print(f"[{username}] เชื่อมต่อไม่ได้: {e}")
-        return {"live": None, "viewer_count": None}
+    last_error = None
 
-    if resp.status_code != 200:
-        print(f"[{username}] status code {resp.status_code}")
-        return {"live": None, "viewer_count": None}
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=15)
+        except requests.RequestException as e:
+            last_error = f"เชื่อมต่อไม่ได้: {e}"
+            time.sleep(2)
+            continue
 
-    data = extract_json_blob(resp.text)
-    if data is None:
-        print(f"[{username}] หา JSON ในหน้าเว็บไม่เจอ (โครงสร้างอาจเปลี่ยน)")
-        return {"live": None, "viewer_count": None}
+        if resp.status_code != 200:
+            last_error = f"status code {resp.status_code}"
+            time.sleep(2)
+            continue
 
-    if debug:
-        print(json.dumps(data, ensure_ascii=False, indent=2)[:5000])
+        data = extract_json_blob(resp.text)
+        if data is None:
+            last_error = "หา JSON ในหน้าเว็บไม่เจอ (โครงสร้างอาจเปลี่ยน หรือโดนบล็อกชั่วคราว)"
+            time.sleep(2)
+            continue
 
-    try:
-        user_detail = data["__DEFAULT_SCOPE__"]["webapp.user-detail"]
-    except (KeyError, TypeError):
-        print(f"[{username}] ไม่พบข้อมูล user-detail ในหน้านี้ (username อาจไม่ถูกต้อง)")
-        return {"live": None, "viewer_count": None}
+        if debug:
+            print(json.dumps(data, ensure_ascii=False, indent=2)[:5000])
 
-    user_info = user_detail.get("userInfo", {})
-    room_id = user_info.get("user", {}).get("roomId") or user_detail.get("roomId")
-    is_live = bool(room_id and str(room_id) != "0")
+        try:
+            user_detail = data["__DEFAULT_SCOPE__"]["webapp.user-detail"]
+        except (KeyError, TypeError):
+            print(f"[{username}] ไม่พบข้อมูล user-detail ในหน้านี้ (username อาจไม่ถูกต้อง)")
+            return {"live": None, "viewer_count": None}
 
-    viewer_count = None
-    if is_live:
-        viewer_count = find_first_key(user_detail, VIEWER_COUNT_KEYS)
+        user_info = user_detail.get("userInfo", {})
+        room_id = user_info.get("user", {}).get("roomId") or user_detail.get("roomId")
+        is_live = bool(room_id and str(room_id) != "0")
 
-    return {"live": is_live, "viewer_count": viewer_count}
+        viewer_count = None
+        if is_live:
+            viewer_count = find_first_key(user_detail, VIEWER_COUNT_KEYS)
+
+        return {"live": is_live, "viewer_count": viewer_count}
+
+    print(f"[{username}] เช็คไม่สำเร็จหลังลอง {MAX_RETRIES} ครั้ง ({last_error})")
+    return {"live": None, "viewer_count": None}
 
 
 # ---------- Telegram ----------
@@ -260,7 +285,7 @@ def handle_user(username, state, now_ts):
     was_live = prev.get("live", False)
 
     if check["live"] and not was_live:
-        # เพิ่งเริ่มไลฟ์
+        # เพิ่งเริ่มไลฟ์รอบใหม่ -> รีเซ็ต acknowledged เป็น False เสมอ
         start_time = now_ts
         duration_text = format_duration(0)
         text = build_live_message(username, duration_text, check["viewer_count"])
@@ -290,12 +315,11 @@ def handle_user(username, state, now_ts):
         users[username] = prev
 
     elif not check["live"] and was_live:
-        # ไลฟ์จบแล้ว
+        # ไลฟ์จบแล้ว -> เคลียร์สถานะทั้งหมด รอบหน้าไลฟ์ใหม่จะแจ้งเตือนใหม่เสมอ
         print(f"[{username}] ไลฟ์จบแล้ว")
         users[username] = {"live": False}
 
     else:
-        # ไม่ไลฟ์ทั้งก่อนหน้าและตอนนี้ ไม่ต้องทำอะไร
         users.setdefault(username, {"live": False})
 
 
@@ -326,19 +350,26 @@ def main():
         check_user(debug_user, debug=True)
         return
 
+    now_dt = datetime.now(TZ)
+
+    if not is_within_active_hours(now_dt):
+        print(f"อยู่นอกช่วงเวลาทำงาน ({now_dt.strftime('%H:%M')} น.) ข้ามรอบนี้ (ทำงาน 08:00-01:00)")
+        return
+
     usernames = load_usernames()
     if not usernames:
         print("ไม่มี username ให้เช็ค (ดูไฟล์ usernames.txt)")
         return
 
     state = load_state()
-    now_dt = datetime.now(TZ)
     now_ts = time.time()
 
     process_incoming_updates(state)
 
-    for username in usernames:
+    for i, username in enumerate(usernames):
         handle_user(username, state, now_ts)
+        if i < len(usernames) - 1:
+            time.sleep(random.uniform(*DELAY_BETWEEN_CHECKS_SEC))
 
     send_daily_ping(state, usernames, now_dt)
 
