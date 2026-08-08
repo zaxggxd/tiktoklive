@@ -1,8 +1,7 @@
 {
   "users": {
     "lukchup001": {
-      "live": true,
-      "start_time": 1786204836.248363
+      "live": false
     },
     "bunny_vt3010": {
       "live": false
