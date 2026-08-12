@@ -14,16 +14,18 @@
       "start_time": 1786350024.673794
     },
     "daencutegirl": {
-      "live": true,
-      "start_time": 1786348838.5918474
+      "live": false
     },
     "kdusixgb": {
       "live": false
     },
     "macha_7776": {
       "live": false
+    },
+    "6zenpai": {
+      "live": false
     }
   },
   "telegram_offset": 802096989,
-  "last_daily_ping_date": "2026-08-10"
+  "last_daily_ping_date": "2026-08-12"
 }
