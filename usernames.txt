@@ -1,4 +1,3 @@
-lukchup001
-daencutegirl
-kdusixgb
-momentsanserve
+# ไฟล์นี้ไม่ใช้แล้ว! รายชื่อ username ย้ายไปเก็บใน GitHub Secret ชื่อ TIKTOK_USERNAMES แทน
+# (เพื่อไม่ให้เห็นแบบสาธารณะตอน repo เป็น Public)
+# ถ้าอยากดู/แก้รายชื่อ ให้ไปที่ Settings > Secrets and variables > Actions > TIKTOK_USERNAMES
