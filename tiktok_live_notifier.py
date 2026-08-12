@@ -31,7 +31,7 @@ DELAY_BETWEEN_CHECKS_SEC = (3, 6)  # หน่วงเวลาแบบสุ�
 MAX_RETRIES = 2
 
 # ช่วงเวลาที่อนุญาตให้เช็ค: 08:00 ถึง 00:59 (เที่ยงคืนครึ่งหลัง จนถึงก่อนตี 1)
-ACTIVE_HOUR_START = 8
+ACTIVE_HOUR_START = 11
 ACTIVE_HOUR_END_EXCLUSIVE = 1
 
 HEADERS = {
@@ -53,8 +53,15 @@ def is_within_active_hours(now_dt):
 # ---------- ไฟล์ / state ----------
 
 def load_usernames():
+    # ลำดับความสำคัญ: อ่านจาก Secret (TIKTOK_USERNAMES) ก่อน เพื่อไม่ให้ชื่อช่องเปิดเผยแบบ public
+    env_value = os.environ.get("TIKTOK_USERNAMES", "").strip()
+    if env_value:
+        # รองรับทั้งคั่นด้วย comma และขึ้นบรรทัดใหม่
+        raw_items = re.split(r"[,\n]+", env_value)
+        return [u.strip().lstrip("@") for u in raw_items if u.strip()]
+
     if not os.path.exists(USERNAMES_FILE):
-        print(f"ไม่พบไฟล์ {USERNAMES_FILE}")
+        print(f"ไม่พบไฟล์ {USERNAMES_FILE} และไม่ได้ตั้งค่า Secret TIKTOK_USERNAMES")
         return []
     with open(USERNAMES_FILE, "r", encoding="utf-8") as f:
         return [line.strip().lstrip("@") for line in f if line.strip() and not line.startswith("#")]
