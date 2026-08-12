@@ -33,6 +33,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TIKTOK_USERNAMES: ${{ secrets.TIKTOK_USERNAMES }}
         run: |
           if [ -n "${{ github.event.inputs.debug_user }}" ]; then
             python tiktok_live_notifier.py --debug "${{ github.event.inputs.debug_user }}"
