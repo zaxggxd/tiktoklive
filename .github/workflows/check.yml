@@ -10,7 +10,7 @@ on:
 
 concurrency:
   group: tiktok-live-check
-  cancel-in-progress: false   # ถ้ามีรอบใหม่เข้ามาตอนรอบเก่ายังไม่จบ ให้รอคิวแทนรันซ้อน
+  cancel-in-progress: true
 
 permissions:
   contents: write
