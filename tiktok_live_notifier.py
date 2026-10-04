@@ -2,7 +2,7 @@
 TikTok Live Notifier (v4 - Simplified)
 ----------------------------------------
 ฟีเจอร์:
-  - เช็คเฉพาะช่วงเวลา 08:00 - 01:00 (เวลาไทย) เท่านั้น
+  - เช็คเฉพาะช่วงเวลา 08:00 - 05:30 (เวลาไทย) เท่านั้น
   - แจ้งเตือนตอนเริ่มไลฟ์ (ข้อความเดียว ไม่มีปุ่ม ไม่เตือนซ้ำ)
   - แจ้งเตือนตอนไลฟ์จบ พร้อมระยะเวลารวมที่ไลฟ์ไป
   - ส่งข้อความสถานะระบบวันละ 1 ครั้ง (heartbeat)
@@ -30,9 +30,9 @@ TZ = ZoneInfo("Asia/Bangkok")
 DELAY_BETWEEN_CHECKS_SEC = (3, 6)  # หน่วงเวลาแบบสุ่มระหว่างเช็คแต่ละช่อง (วินาที)
 MAX_RETRIES = 2
 
-# ช่วงเวลาที่อนุญาตให้เช็ค: 08:00 ถึง 00:59 (เที่ยงคืนครึ่งหลัง จนถึงก่อนตี 1)
-ACTIVE_HOUR_START = 11
-ACTIVE_HOUR_END_EXCLUSIVE = 1
+# ช่วงเวลาที่อนุญาตให้เช็ค: 08:00 ถึง 05:30 (เป็นนาทีนับจากเที่ยงคืน เพื่อรองรับครึ่งชั่วโมง)
+ACTIVE_START_MINUTES = 8 * 60          # 08:00
+ACTIVE_END_EXCLUSIVE_MINUTES = 5 * 60 + 30  # 05:30
 
 HEADERS = {
     "User-Agent": (
@@ -46,8 +46,9 @@ HEADERS = {
 # ---------- เวลาทำงาน ----------
 
 def is_within_active_hours(now_dt):
-    hour = now_dt.hour
-    return hour >= ACTIVE_HOUR_START or hour < ACTIVE_HOUR_END_EXCLUSIVE
+    minutes_now = now_dt.hour * 60 + now_dt.minute
+    # ช่วงข้ามเที่ยงคืน (เช่น 08:00 ถึง 05:30 ของวันถัดไป)
+    return minutes_now >= ACTIVE_START_MINUTES or minutes_now < ACTIVE_END_EXCLUSIVE_MINUTES
 
 
 # ---------- ไฟล์ / state ----------
@@ -232,7 +233,7 @@ def main():
     now_dt = datetime.now(TZ)
 
     if not is_within_active_hours(now_dt):
-        print(f"อยู่นอกช่วงเวลาทำงาน ({now_dt.strftime('%H:%M')} น.) ข้ามรอบนี้ (ทำงาน 08:00-01:00)")
+        print(f"อยู่นอกช่วงเวลาทำงาน ({now_dt.strftime('%H:%M')} น.) ข้ามรอบนี้ (ทำงาน 08:00-05:30)")
         return
 
     usernames = load_usernames()
