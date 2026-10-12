@@ -23,7 +23,8 @@
       "live": false
     },
     "6zenpai": {
-      "live": false
+      "live": true,
+      "start_time": 1791837028.3973153
     }
   },
   "telegram_offset": 802096989,
