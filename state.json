@@ -14,7 +14,8 @@
       "start_time": 1786350024.673794
     },
     "daencutegirl": {
-      "live": false
+      "live": true,
+      "start_time": 1792774835.6801023
     },
     "kdusixgb": {
       "live": false
@@ -27,5 +28,5 @@
     }
   },
   "telegram_offset": 802096989,
-  "last_daily_ping_date": "2026-10-23"
+  "last_daily_ping_date": "2026-10-24"
 }
